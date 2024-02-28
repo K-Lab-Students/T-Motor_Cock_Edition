@@ -1,0 +1,980 @@
+/*
+ * rmdx8pro.c
+ *
+ *  Created on: 2 нояб. 2023 г.
+ *      Author: NakedSnake
+ */
+
+#include "rmdx8pro.h"
+#include "stm32f7xx_hal.h"
+#include "stm32f7xx_hal_can.h"
+uint32_t TxMailbox = 0;
+extern CAN_HandleTypeDef hcan1;
+extern huart2;
+
+void gyemsDeviceInit(GYEMSDevice_t *device)
+{
+    device->registers->lastSmState = GYEMS_INIT;
+    device->smState = gyemsDevicePreop;
+
+    device->smState = gyemsDevicePreop;
+
+}
+
+void gyemsDevicePreop(GYEMSDevice_t *device)
+{
+    device->registers->lastSmState = GYEMS_PREOP;
+
+//    if (device->requestedSmState == OP)
+//    {
+        device->smState = gyemsDevicePreopToOp;
+//    }
+}
+
+void gyemsDevicePreopToOp(GYEMSDevice_t *device)
+{
+    device->registers->lastSmState = GYEMS_PREOP_TO_OP;
+    device->smState = gyemsDeviceOp;
+
+
+    if(GYEMSDeviceMotorRunCmd(device)){
+
+//    	__HAL_CAN_DISABLE_IT(&hcan1, 0b11111111111111111);
+    HAL_Delay(5000);
+    GYEMSDeviceTorqueCurrControlCmd(device, 34);
+    device->smState = gyemsDeviceOp;
+    } else
+    {
+        device->smState = gyemsDeviceFault;
+    }
+
+}
+
+void gyemsDeviceOp(GYEMSDevice_t *device)
+{
+    device->registers->lastSmState = GYEMS_OP;
+
+    //    switch (device->registers->in.driveMode) {
+    //        case CURRENT:
+    //          GYEMSDeviceTorqueCurrControlCmd(device, device->registers->in.driveTask);
+
+
+    //            break;
+    //    }
+
+
+}
+
+void gyemsDeviceFault(GYEMSDevice_t *device)
+{
+    device->registers->lastSmState = GYEMS_FAULT;
+//    device->smState = gyemsDeviceInit;
+}
+
+
+
+
+
+
+void GYEMSDeviceInit(GYEMSDevice_t *device_ptr, uint32_t id, GYEMSDeviceRegisters_t *regSpacePtr)
+{
+
+	device_ptr->id = id;
+    device_ptr->lastRecievedMsgTime = 0;
+    device_ptr->hbCounter = 0;
+    device_ptr->resendCounter = 0;
+    device_ptr->registers = regSpacePtr;
+    device_ptr->smState = gyemsDeviceInit;
+    device_ptr->registers->requestedSmState = GYEMS_INIT;
+    device_ptr->registers->in.driveTask = 0.f;
+    device_ptr->registers->in.driveMode = CURRENT;
+    device_ptr->registers->lastSmState = 0;
+
+}
+
+void deviceAppProcess(void* devicePtr)
+{
+    GYEMSDevice_t* device = (GYEMSDevice_t*)(devicePtr);
+
+        device->smState(device);
+
+}
+
+void GYEMSFrameParser(CanFrame_t* canFrame)
+{
+    GYEMSDevice_t* servingDevicePtr;
+
+    uint8_t id = canFrame->SID & GYEMS_ID_MASK;
+
+	switch (canFrame->data8[0])
+	{
+		case HEARTBEAT:
+//                        canDriver->devicePool[i]->hbCounter++;
+			break;
+		case READ_PID_DATA:
+			readPidDataPacketCallback(&canFrame->data8[1]);
+			break;
+		case WRITE_PID_TO_RAM:
+			writePidToRamPacketCallback(&canFrame->data8[1]);
+			break;
+		case WRITE_PID_TO_ROM:
+			writePidToROMPacketCallback(&canFrame->data8[1]);
+			break;
+		case READ_ACCEL_DATA:
+			readAccelDataPacketCallback(&canFrame->data8[1]);
+			break;
+		case WRITE_ACCEL_DATA_TO_RAM:
+			writeAccelDataPacketCallback(&canFrame->data8[1]);
+			break;
+		case READ_ENCODER_DATA:
+			readEncoderDataPacketCallback(&canFrame->data8[1]);
+			break;
+		case WRITE_ENCODER_OFFSET:
+			writeEncoderOffsetPacketCallback(&canFrame->data8[1]);
+			break;
+		case WRITE_CURR_POS_TO_ROM_AS_ZERO:
+			writeCurrPosToROMAsZeroPacketCallback(&canFrame->data8[1]);
+			break;
+		case READ_MULTI_TURNS_ANGLE:
+			readMultiTurnPosPacketCallback(&canFrame->data8[1]);
+			break;
+		case READ_SINGLE_CIRCLE_ANGLE:
+			readSingleCircleAnglePacketCallback(&canFrame->data8[1]);
+			break;
+		case READ_MOTOR_STATUS_1_AND_ERR_FLAG:
+			readMotorStatus1AndErrPacketCallback(canFrame->data8, servingDevicePtr);
+			break;
+		case CLEAR_MOTOR_ERR_FLAG:
+			clearMotorErrFlagPacketCallback(&canFrame->data8[1]);
+			break;
+		case READ_MOTOR_STATUS_2:
+			readMotorStatus2PacketCallback(&canFrame->data8[1]);
+			break;
+		case READ_MOTOR_STATUS_3:
+			readMotorStatus3PacketCallback(&canFrame->data8[1]);
+			break;
+		case MOTOR_OFF:
+			motorOffPacketCallback(&canFrame->data8[1]);
+			break;
+		case MOTOR_STOP:
+			motorStopPacketCallback(&canFrame->data8[1]);
+			break;
+		case MOTOR_RUNNING:
+			motorRunningPacketCallback(&canFrame->data8[1]);
+			break;
+		case TORQUE_CLOSED_LOOP_CMD:
+			torqueClosedLoopCMDPacketCallback(canFrame->data8, servingDevicePtr);
+			break;
+		case SPEED_CLOSED_LOOP_CMD:
+			speedClosedLoopCMDPacketCallback(canFrame->data8, servingDevicePtr);
+			break;
+		case POSITION_CLOSED_LOOP_CMD_1:
+			positionClosedLoopCMD1PacketCallback(&canFrame->data8[1]);
+			break;
+		case POSITION_CLOSED_LOOP_CMD_2:
+			positionClosedLoopCMD2PacketCallback(&canFrame->data8[1]);
+			break;
+		case POSITION_CLOSED_LOOP_CMD_3:
+			positionClosedLoopCMD3PacketCallback(&canFrame->data8[1]);
+			break;
+		case POSITION_CLOSED_LOOP_CMD_4:
+			positionClosedLoopCMD4PacketCallback(&canFrame->data8[1]);
+			break;
+//      default:
+	}
+
+
+
+
+}
+
+void GYEMSDeviceReadPidDataCmd(GYEMSDevice_t* device_ptr)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+    CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = READ_PID_DATA;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+    TxHeader.StdId = txFrame.SID;
+
+    TxHeader.ExtId = 0;
+    TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+    TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+    HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDeviceSendPidDataToRAMCmd(GYEMSDevice_t* device_ptr,
+                                    uint8_t anglePidKp,
+                                    uint8_t anglePidKi,
+                                    uint8_t speedPidKp,
+                                    uint8_t speedPidKi,
+                                    uint8_t iqPidKp,
+                                    uint8_t iqPidKi)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = WRITE_PID_TO_RAM;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = anglePidKp;
+    txFrame.data8[3] = anglePidKi;
+    txFrame.data8[4] = speedPidKp;
+    txFrame.data8[5] = speedPidKi;
+    txFrame.data8[6] = iqPidKp;
+    txFrame.data8[7] = iqPidKi;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDeviceSendPidDataToROMCmd(GYEMSDevice_t* device_ptr,
+                                    uint8_t anglePidKp,
+                                    uint8_t anglePidKi,
+                                    uint8_t speedPidKp,
+                                    uint8_t speedPidKi,
+                                    uint8_t iqPidKp,
+                                    uint8_t iqPidKi)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+
+    txFrame.data8[0] = WRITE_PID_TO_ROM;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = anglePidKp;
+    txFrame.data8[3] = anglePidKi;
+    txFrame.data8[4] = speedPidKp;
+    txFrame.data8[5] = speedPidKi;
+    txFrame.data8[6] = iqPidKp;
+    txFrame.data8[7] = iqPidKi;
+    txFrame.answerWait = 1;
+}
+
+void GYEMSDeviceReadAccelDataCmd(GYEMSDevice_t* device_ptr)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = READ_ACCEL_DATA;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDeviceSendAccelDataToRAMCmd(GYEMSDevice_t* device_ptr, int32_t accel)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    //TODO: требует проверки
+    txFrame.data8[0] = WRITE_ACCEL_DATA_TO_RAM;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = accel & 0xFF;
+    txFrame.data8[5] = accel >> 8;
+    txFrame.data8[6] = accel >> 16;
+    txFrame.data8[7] = accel >> 24;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDeviceReadEncoderDataCmd(GYEMSDevice_t* device_ptr)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = READ_ENCODER_DATA;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+
+}
+
+void GYEMSDeviceWriteEncoderOffsetCmd(GYEMSDevice_t* device_ptr, uint16_t offset)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = WRITE_ENCODER_OFFSET;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = offset & 0xFF;
+    txFrame.data8[7] = offset >> 8;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+
+}
+
+void GYEMSDeviceWriteCurrPosToROMAsZero(GYEMSDevice_t* device_ptr)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = WRITE_CURR_POS_TO_ROM_AS_ZERO;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDeviceReadMultiTurnAngle(GYEMSDevice_t* device_ptr)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = READ_MULTI_TURNS_ANGLE;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDeviceReadSingleCircleAngle(GYEMSDevice_t* device_ptr)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = READ_SINGLE_CIRCLE_ANGLE;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDeviceMotorOffCmd(GYEMSDevice_t* device_ptr)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = MOTOR_OFF;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDeviceMotorStopCmd(GYEMSDevice_t* device_ptr)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = MOTOR_STOP;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+uint8_t GYEMSDeviceMotorRunCmd(GYEMSDevice_t *device_ptr)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = MOTOR_RUNNING;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	while(HAL_CAN_GetTxMailboxesFreeLevel(&hcan1) == 0);
+
+	if(HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox) != HAL_OK)
+	{
+			HAL_UART_Transmit(&huart2, (uint8_t*)"ER SEND\n", 8, 100);
+	}
+	else {
+		HAL_UART_Transmit_IT(&huart2, txFrame.data8, sizeof(txFrame.data8));
+		return 1;
+	}
+}
+
+void GYEMSDeviceReadMotorStatus1AndErr(GYEMSDevice_t *device_ptr)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = READ_MOTOR_STATUS_1_AND_ERR_FLAG;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDeviceSystemOperationModeAcquisition(GYEMSDevice_t *device_ptr)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = SYSTEM_OPERATION_MODE_ACQUISITION;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDeviceClearMotorErrFlagCmd(GYEMSDevice_t* device_ptr)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = CLEAR_MOTOR_ERR_FLAG;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDeviceReadMotorStatus2(GYEMSDevice_t* device_ptr)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = READ_MOTOR_STATUS_2;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDeviceReadMotorStatus3(GYEMSDevice_t* device_ptr)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    txFrame.data8[0] = READ_MOTOR_STATUS_3;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = 0;
+    txFrame.data8[5] = 0;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDeviceTorqueCurrControlCmd(GYEMSDevice_t *device_ptr, float current)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    //TODO: проверять величину тока
+    txFrame.answerWait = 1;
+    int16_t currentTranslated = (int16_t)(current / GYEMS_AMPERES_PER_NUMBER);
+
+    txFrame.data8[0] = TORQUE_CLOSED_LOOP_CMD;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = currentTranslated & 0xFF; //TODO: проверить порядок байт
+    txFrame.data8[5] = currentTranslated >> 8;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	if(HAL_CAN_GetTxMailboxesFreeLevel(&hcan1)){
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+	}
+}
+
+void GYEMSDeviceSpeedControlCmd(GYEMSDevice_t* device_ptr, float speedDps)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    int32_t speedTranslated = (int32_t)(speedDps / GYEMS_SPEED_PER_NUMBER);
+
+    txFrame.data8[0] = SPEED_CLOSED_LOOP_CMD;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = speedTranslated & 0xFF; //TODO: проверить порядок байт
+    txFrame.data8[5] = speedTranslated >> 8;
+    txFrame.data8[6] = speedTranslated >> 16;
+    txFrame.data8[7] = speedTranslated >> 24;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDevicePositionControlCmd1(GYEMSDevice_t* device_ptr, float posDegree)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    int32_t posTranslated = (int32_t)(posDegree / GYEMS_DEGREE_PER_NUMBER);
+
+    txFrame.data8[0] = POSITION_CLOSED_LOOP_CMD_1;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = posTranslated & 0xFF; //TODO: проверить порядок байт
+    txFrame.data8[5] = posTranslated >> 8;
+    txFrame.data8[6] = posTranslated >> 16;
+    txFrame.data8[7] = posTranslated >> 24;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDevicePositionControlCmd2(GYEMSDevice_t* device_ptr, float posDegree, float maxSpeed)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+    int32_t posTranslated = (int32_t)(posDegree / GYEMS_DEGREE_PER_NUMBER);
+    uint16_t maxSpeedTranslated = (uint16_t)(maxSpeed / GYEMS_MAX_SPEED_PER_NUMBER);
+
+    txFrame.data8[0] = POSITION_CLOSED_LOOP_CMD_2;
+    txFrame.data8[1] = 0;
+    txFrame.data8[2] = maxSpeedTranslated & 0xFF;
+    txFrame.data8[3] = maxSpeedTranslated >> 8;
+    txFrame.data8[4] = posTranslated & 0xFF; //TODO: проверить порядок байт
+    txFrame.data8[5] = posTranslated >> 8;
+    txFrame.data8[6] = posTranslated >> 16;
+    txFrame.data8[7] = posTranslated >> 24;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDevicePositionControlCmd3(GYEMSDevice_t* device_ptr, float unsignedPosDegree, uint8_t spinDirection)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+
+    uint16_t posTranslated = (uint16_t)(unsignedPosDegree / GYEMS_DEGREE_PER_NUMBER);
+
+    txFrame.data8[0] = POSITION_CLOSED_LOOP_CMD_3;
+    txFrame.data8[1] = spinDirection;
+    txFrame.data8[2] = 0;
+    txFrame.data8[3] = 0;
+    txFrame.data8[4] = posTranslated & 0xFF; //TODO: проверить порядок байт
+    txFrame.data8[5] = posTranslated >> 8;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void GYEMSDevicePositionControlCmd4(GYEMSDevice_t* device_ptr, float unsignedPosDegree,
+                                    float unsignedMaxSpeed, uint8_t spinDirection)
+{
+    CanFrame_t txFrame;
+    CAN_TxHeaderTypeDef TxHeader;
+	CAN_RxHeaderTypeDef RxHeader;
+
+    txFrame.SID = device_ptr->id;
+    txFrame.DLC = 8;
+    txFrame.answerWait = 1;
+
+    uint16_t posTranslated = (uint16_t)(unsignedPosDegree / GYEMS_DEGREE_PER_NUMBER);
+    uint16_t maxSpeedTranslated = (uint16_t)(unsignedMaxSpeed / GYEMS_MAX_SPEED_PER_NUMBER);
+
+    txFrame.data8[0] = POSITION_CLOSED_LOOP_CMD_4;
+    txFrame.data8[1] = spinDirection;
+    txFrame.data8[2] = maxSpeedTranslated & 0xFF;
+    txFrame.data8[3] = maxSpeedTranslated >> 8;
+    txFrame.data8[4] = posTranslated & 0xFF; //TODO: проверить порядок байт
+    txFrame.data8[5] = posTranslated >> 8;
+    txFrame.data8[6] = 0;
+    txFrame.data8[7] = 0;
+
+    TxHeader.DLC = txFrame.DLC;
+	TxHeader.StdId = txFrame.SID;
+
+	TxHeader.ExtId = 0;
+	TxHeader.RTR = CAN_RTR_DATA; //CAN_RTR_REMOTE
+	TxHeader.IDE = CAN_ID_STD;   // CAN_ID_EXT
+	HAL_CAN_AddTxMessage(&hcan1, &TxHeader, txFrame.data8, &TxMailbox);
+}
+
+void readPidDataPacketCallback(uint8_t* data)
+{
+
+}
+void writePidToRamPacketCallback(uint8_t* data)
+{
+
+}
+void writePidToROMPacketCallback(uint8_t* data)
+{
+
+}
+void readAccelDataPacketCallback(uint8_t* data)
+{
+
+}
+void writeAccelDataPacketCallback(uint8_t* data)
+{
+
+}
+void readEncoderDataPacketCallback(uint8_t* data)
+{
+
+}
+void writeEncoderOffsetPacketCallback(uint8_t* data)
+{
+
+}
+void writeCurrPosToROMAsZeroPacketCallback(uint8_t* data)
+{
+
+}
+void readMultiTurnPosPacketCallback(uint8_t* data)
+{
+
+}
+void readSingleCircleAnglePacketCallback(uint8_t* data)
+{
+
+}
+void readMotorStatus1AndErrPacketCallback(uint8_t *data, GYEMSDevice_t *devicePtr)
+{
+    devicePtr->registers->out.motorTemp = *(int8_t*)(&data[1]);
+    uint16_t voltageRaw = *(uint16_t*)(&data[4]);
+    devicePtr->registers->out.voltage = voltageRaw * GYEMS_VOLTS_PER_NUMBER;
+    devicePtr->registers->out.errorState.regRaw = *(uint16_t*)(&data[6]);
+}
+void clearMotorErrFlagPacketCallback(uint8_t* data)
+{
+
+}
+void readMotorStatus2PacketCallback(uint8_t* data)
+{
+
+}
+void readMotorStatus3PacketCallback(uint8_t* data)
+{
+
+}
+void motorOffPacketCallback(uint8_t* data)
+{
+
+}
+void motorStopPacketCallback(uint8_t* data)
+{
+
+}
+void motorRunningPacketCallback(uint8_t* data)
+{
+
+}
+void torqueClosedLoopCMDPacketCallback(uint8_t *data, GYEMSDevice_t *devicePtr)
+{
+    int16_t currentRaw = *(int16_t*)(&data[2]);
+
+    devicePtr->registers->out.motorTemp = *(int8_t*)(&data[1]);
+    devicePtr->registers->out.motorTorqueCurr = (float)currentRaw * GYEMS_AMPERES_PER_NUMBER;
+    devicePtr->registers->out.motorSpeed = *(int16_t *)(&data[4]);
+    devicePtr->registers->out.encoderPos = *(uint16_t *)(&data[6]);
+}
+void speedClosedLoopCMDPacketCallback(uint8_t* data, GYEMSDevice_t *devicePtr)
+{
+    int16_t currentRaw = *(int16_t*)(&data[2]);
+
+    devicePtr->registers->out.motorTemp = *(int8_t*)(&data[1]);
+    devicePtr->registers->out.motorTorqueCurr = (float)currentRaw * GYEMS_AMPERES_PER_NUMBER;
+    devicePtr->registers->out.motorSpeed = *(int16_t *)(&data[4]);
+    devicePtr->registers->out.encoderPos = *(uint16_t *)(&data[6]);
+}
+void positionClosedLoopCMD1PacketCallback(uint8_t* data)
+{
+
+}
+void positionClosedLoopCMD2PacketCallback(uint8_t* data)
+{
+
+}
+void positionClosedLoopCMD3PacketCallback(uint8_t* data)
+{
+
+}
+void positionClosedLoopCMD4PacketCallback(uint8_t* data)
+{
+
+}

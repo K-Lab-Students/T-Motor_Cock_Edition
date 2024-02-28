@@ -1,0 +1,13 @@
+ak_drv.c:20:6:comm_can_transmit_eid	3
+ak_drv.c:40:6:buffer_append_int32	1
+ak_drv.c:59:6:buffer_append_int16	1
+ak_drv.c:70:6:comm_can_set_pos	1
+ak_drv.c:79:6:comm_can_set_pos_spd	1
+ak_drv.c:100:6:comm_can_set_origin	1
+ak_drv.c:109:6:comm_can_set_rpm	1
+ak_drv.c:118:6:comm_can_set_cb	1
+ak_drv.c:125:6:comm_can_set_current	1
+ak_drv.c:133:6:comm_can_set_duty	1
+ak_drv.c:140:6:motor_receive	1
+ak_drv.c:154:6:motorInit	1
+ak_drv.c:158:6:motor_Calibration	5

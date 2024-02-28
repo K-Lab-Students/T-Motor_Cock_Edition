@@ -1,0 +1,5 @@
+freertos.c:98:6:MX_FREERTOS_Init	1
+freertos.c:149:6:Task1msHandler	1
+freertos.c:171:6:StartDefaultTask	1
+freertos.c:189:6:Task10msHandler	1
+freertos.c:212:6:Task50msHandler	1

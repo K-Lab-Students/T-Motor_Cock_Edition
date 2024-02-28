@@ -1,0 +1,5 @@
+gyems-can-device-states.c:8:6:gyemsDeviceInit	2
+gyems-can-device-states.c:21:6:gyemsDevicePreop	1
+gyems-can-device-states.c:31:6:gyemsDevicePreopToOp	2
+gyems-can-device-states.c:48:6:gyemsDeviceOp	2
+gyems-can-device-states.c:64:6:gyemsDeviceFault	1

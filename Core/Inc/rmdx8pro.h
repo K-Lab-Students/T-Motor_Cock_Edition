@@ -1,0 +1,298 @@
+/*
+ * rmdx8pro.h
+ *
+ *  Created on: 2 нояб. 2023 г.
+ *      Author: NakedSnake
+ */
+
+#ifndef INC_RMDX8PRO_H_
+#define INC_RMDX8PRO_H_
+
+#include <stdint.h>
+#include "stm32f7xx_hal.h"
+
+#define GYEMS_ID_MASK               0x3F //диапазон id: 1-32
+#define GYEMS_AMPERES_PER_NUMBER    (float)(33.f / 2048.f)//0.016f // 32A / 2000
+#define GYEMS_SPEED_PER_NUMBER      0.01f //dps/LSB
+#define GYEMS_DEGREE_PER_NUMBER     0.01f //degree/LSB
+#define GYEMS_VOLTS_PER_NUMBER      0.1f //V/LSB
+#define GYEMS_MAX_SPEED_PER_NUMBER  1.f //dps/LSB
+
+#define GYEMS_MSG_REPLY_TIMEOUT_VAL_MS 500
+
+#define GYEMS_DEVICE_TASK_STACK_SIZE 512
+
+
+
+
+typedef enum {
+    HEARTBEAT = 0xB1,
+    READ_PID_DATA = 0x30,
+    WRITE_PID_TO_RAM = 0x31,
+    WRITE_PID_TO_ROM = 0x32,
+    READ_ACCEL_DATA = 0x33,
+    WRITE_ACCEL_DATA_TO_RAM = 0x34,
+    READ_ENCODER_DATA = 0x90,
+    WRITE_ENCODER_OFFSET = 0x91,
+    WRITE_CURR_POS_TO_ROM_AS_ZERO = 0x19,
+    READ_MULTI_TURNS_ANGLE = 0x92,
+    READ_SINGLE_CIRCLE_ANGLE = 0x94,
+    READ_MOTOR_STATUS_1_AND_ERR_FLAG = 0x9A,
+    CLEAR_MOTOR_ERR_FLAG = 0x9B,
+    READ_MOTOR_STATUS_2 = 0x9C,
+    READ_MOTOR_STATUS_3 = 0x9D,
+    MOTOR_OFF = 0x80,
+    MOTOR_STOP = 0x81,
+    MOTOR_RUNNING = 0x88,
+    SYSTEM_OPERATION_MODE_ACQUISITION = 0x70,
+
+    /*
+     * значение этой команды не ограничивается значением Max Torque Current
+     */
+    TORQUE_CLOSED_LOOP_CMD = 0xA1,
+    /* макс. ток  для этой команды ограничичвается значением Max Torque Current
+     * в этом режиме максимальное ускорение также ограничивается значением Max Acceleration
+     */
+    SPEED_CLOSED_LOOP_CMD = 0xA2,
+    POSITION_CLOSED_LOOP_CMD_1 = 0xA3,
+    POSITION_CLOSED_LOOP_CMD_2 = 0xA4,
+    POSITION_CLOSED_LOOP_CMD_3 = 0xA5,
+    POSITION_CLOSED_LOOP_CMD_4 = 0xA8
+}GYEMSCmdList_e;
+
+typedef enum {
+    DRIVER_TX_FIFO_TIMEOUT
+}GYEMSSoftwareError_e;
+
+typedef enum{
+    GYEMS_INIT = 1U,
+    GYEMS_PREOP = 2U,
+    GYEMS_PREOP_TO_OP = 3U,
+    GYEMS_OP = 4U,
+    GYEMS_FAULT = 5U,
+    GYEMS_NOT_DEFINED = 6U
+}GYEMSDeviceSMState_e;
+
+typedef enum {
+    CURRENT,
+    SPEED,
+    POSITION
+}GYEMSDeviceDriveMode_e;
+
+typedef enum {
+    TRANSACTION,
+    STREAM
+}GYEMSDeviceMsgSendType_e;
+
+typedef struct {
+    union {
+        uint8_t regRaw;
+        struct {
+            uint8_t VOLTAGE_STATUS: 1;
+            uint8_t reserved0: 2;
+            uint8_t TEMP_STATUS: 1;
+            uint8_t reserved1: 4;
+        };
+    };
+}__attribute__((packed)) ErrorStateReg_t;
+
+
+typedef struct
+{
+    struct
+    {
+        float           voltage; // 0.1V/LSB
+        float           motorTorqueCurr; // диапазон +-2048, реальный диапазон +- 33А
+        int16_t         motorSpeed; // 1dps/LSB
+        uint16_t        encoderPos; //14bit, 0-16383, (encoderRawPos - encoderZeroOffset)
+        int8_t          motorTemp; // 1C/LSB
+        ErrorStateReg_t errorState;
+        uint32_t* rxPacketFreq;
+    }out;
+
+    struct
+    {
+        GYEMSDeviceDriveMode_e driveMode;
+        float driveTask;
+    }in;
+
+    GYEMSDeviceSMState_e requestedSmState;
+    GYEMSDeviceSMState_e lastSmState;
+//    uint32_t rxPacketFreq;
+}GYEMSDeviceRegisters_t;
+
+typedef struct GYEMSDevice_t
+{
+	uint32_t id;
+    struct GYEMSDriver_t* gyemsDriver;
+
+//    uint8_t anglePidKp;
+//    uint8_t anglePidKi;
+//    uint8_t speedPidKp;
+//    uint8_t speedPidKi;
+//    uint8_t iqPidKp; //torque loop
+//    uint8_t iqPidKi;
+//    float currAcceleration;
+//    int32_t motorAcceleration; //1dps/s
+//    uint16_t encoderRawPos;
+//    uint16_t encoderZeroOffset;
+
+//    //TODO: вероятно размер переменной можно уменьшить
+//    int64_t motorMultiTurnAngle; //unit 0.01 град / LSB
+
+//    int16_t phaseACurrent; // 1A/LSB
+//    int16_t phaseBCurrent;
+//    int16_t phaseCCurrent;
+//
+//    int16_t torqueCurrentControl; // диапазон +-2000, +-32A
+
+    uint32_t hbCounter;
+    uint32_t resendCounter;
+    uint32_t msgReplyTimeout;
+
+    void (*smState)(struct GYEMSDevice_t*);
+
+    GYEMSDeviceRegisters_t *registers;
+
+    uint32_t rxFreqCountShadow;
+    uint32_t rxFreqCountTmstp;
+    uint32_t lastRecievedMsgTime;
+}GYEMSDevice_t;
+
+typedef struct CanFrame_t
+{
+    uint8_t         DLC:4;          /**< @brief Data length.        */
+    uint8_t         RTR:1;          /**< @brief Frame type.         */
+    uint8_t         IDE:1;          /**< @brief Identifier type.    */
+
+    uint32_t        SID:11;         /**< @brief Standard identifier.*/
+
+    uint8_t         data8[8];       /**< @brief Frame data.         */
+    uint8_t         answerWait:1;   /**@brief Флаг ожидания ответа на передаваемый фрейм*/
+}CanFrame_t;
+
+
+
+typedef struct Register_space_t
+{
+
+    //=========================================================================
+    union
+    {
+        uint16_t data_16;
+        struct
+        {
+            uint8_t switch_on: 1;
+            uint8_t enable_voltage: 1;
+            uint8_t quick_stop: 1;
+            uint8_t enable_operation: 1;
+            uint8_t op_mode_specific : 3;
+            uint8_t fault_reset : 1;
+            uint8_t halt : 1;
+            uint8_t reserved : 2;
+            uint8_t manufacturer_specific : 5;
+        };
+    } controlWord;
+    //=========================================================================
+    union
+    {
+        uint16_t data_16;
+        struct
+        {
+            uint8_t ready_to_switch_on: 1;
+            uint8_t switched_on: 1;
+            uint8_t operation_enabled: 1;
+            uint8_t fault: 1;
+            uint8_t voltage_enabled: 1;
+            uint8_t quick_stop: 1;
+            uint8_t switch_on_disabled: 1;
+            uint8_t warning: 1;
+            uint8_t manufacturer_specific_1: 1;
+            uint8_t remote: 1;
+            uint8_t target_reached: 1;
+            uint8_t internal_limit_active: 1;
+            uint8_t operation_mode_specific: 2;
+            uint8_t manufacturer_specific_2: 2;
+        };
+    } statusWord;
+    //=========================================================================
+    struct
+    {
+        GYEMSDeviceRegisters_t servo_1;
+
+    } servo_registers;
+
+
+    //=========================================================================
+
+    struct
+    {
+        uint8_t cpuLoad;
+    } system_info;
+    //=========================================================================
+} __attribute__((packed)) Register_space_t;
+
+
+void gyemsDeviceInit(GYEMSDevice_t *device);
+void gyemsDevicePreop(GYEMSDevice_t *device);
+void gyemsDevicePreopToOp(GYEMSDevice_t *device);
+void gyemsDeviceOp(GYEMSDevice_t *device);
+void gyemsDeviceFault(GYEMSDevice_t *device);
+
+
+
+void GYEMSDeviceInit(GYEMSDevice_t *device_ptr, uint32_t id,
+                     GYEMSDeviceRegisters_t *regSpacePtr);
+
+void GYEMSDeviceReadPidDataCmd(GYEMSDevice_t* device_ptr);
+
+void GYEMSDeviceSendPidDataToRAMCmd(GYEMSDevice_t* device_ptr,
+                                    uint8_t anglePidKp,
+                                    uint8_t anglePidKi,
+                                    uint8_t speedPidKp,
+                                    uint8_t speedPidKi,
+                                    uint8_t iqPidKp,
+                                    uint8_t iqPidKi);
+
+void GYEMSDeviceSendPidDataToROMCmd(GYEMSDevice_t* device_ptr,
+                                    uint8_t anglePidKp,
+                                    uint8_t anglePidKi,
+                                    uint8_t speedPidKp,
+                                    uint8_t speedPidKi,
+                                    uint8_t iqPidKp,
+                                    uint8_t iqPidKi);
+
+void GYEMSDeviceReadAccelDataCmd(GYEMSDevice_t* device_ptr);
+void GYEMSDeviceSendAccelDataToRAMCmd(GYEMSDevice_t* device_ptr, int32_t accel);
+void GYEMSDeviceReadEncoderDataCmd(GYEMSDevice_t* device_ptr);
+/*
+ * Диапазон значений 14бит энкодера 0-16383.
+ */
+void GYEMSDeviceWriteEncoderOffsetCmd(GYEMSDevice_t* device_ptr, uint16_t offset);
+/*
+ * Требуется перезагрузка по питанию, чтобы смещение было применено.
+ */
+void GYEMSDeviceWriteCurrPosToROMAsZero(GYEMSDevice_t* device_ptr);
+void GYEMSDeviceReadMultiTurnAngle(GYEMSDevice_t* device_ptr);
+void GYEMSDeviceReadSingleCircleAngle(GYEMSDevice_t* device_ptr);
+void GYEMSDeviceMotorOffCmd(GYEMSDevice_t* device_ptr);
+void GYEMSDeviceMotorStopCmd(GYEMSDevice_t* device_ptr);
+uint8_t GYEMSDeviceMotorRunCmd(GYEMSDevice_t *device_ptr);
+void GYEMSDeviceReadMotorStatus1AndErr(GYEMSDevice_t *device_ptr);
+void GYEMSDeviceSystemOperationModeAcquisition(GYEMSDevice_t *device_ptr);
+void GYEMSDeviceClearMotorErrFlagCmd(GYEMSDevice_t* device_ptr);
+void GYEMSDeviceReadMotorStatus2(GYEMSDevice_t* device_ptr);
+void GYEMSDeviceReadMotorStatus3(GYEMSDevice_t* device_ptr);
+/*
+ * ток в этом режиме НЕ ограничен Max Torque Current
+ */
+void GYEMSDeviceTorqueCurrControlCmd(GYEMSDevice_t *device_ptr, float current);
+void GYEMSDeviceSpeedControlCmd(GYEMSDevice_t* device_ptr, float speedDps);
+void GYEMSDevicePositionControlCmd1(GYEMSDevice_t* device_ptr, float posDegree);
+void GYEMSDevicePositionControlCmd2(GYEMSDevice_t* device_ptr, float posDegree, float maxSpeed);
+void GYEMSDevicePositionControlCmd3(GYEMSDevice_t* device_ptr, float unsignedPosDegree, uint8_t spinDirection);
+void GYEMSDevicePositionControlCmd4(GYEMSDevice_t* device_ptr, float unsignedPosDegree,
+                                    float unsignedMaxSpeed);
+
+void GYEMSFrameParser(CanFrame_t* canFrame);
+#endif /* INC_RMDX8PRO_H_ */

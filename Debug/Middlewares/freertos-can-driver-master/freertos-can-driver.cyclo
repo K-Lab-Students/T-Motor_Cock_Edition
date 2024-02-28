@@ -1,0 +1,12 @@
+freertos-can-driver.c:12:13:freertosDummy_func	1
+freertos-can-driver.c:17:6:freertosCanDriverInit	7
+freertos-can-driver.c:79:6:freertosCanDeviceInit	1
+freertos-can-driver.c:87:6:freertosCanDriverDeviceReg	1
+freertos-can-driver.c:94:6:freertosCanDriverSetTransmitProcedure	1
+freertos-can-driver.c:101:6:freertosCanDriverSetIsCanTxAvailableProcedure	1
+freertos-can-driver.c:108:6:freertosCanDriverSetFrameParser	1
+freertos-can-driver.c:114:6:freertosCanDriverSetGetTickFunc	1
+freertos-can-driver.c:119:9:freertosCanDriverSendFrame	4
+freertos-can-driver.c:144:13:canTransmitThread	7
+freertos-can-driver.c:191:13:canRecieveThread	5
+freertos-can-driver.c:227:13:periodicDriverThread	2

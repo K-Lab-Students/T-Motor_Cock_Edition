@@ -1,0 +1,13 @@
+../Core/Src/ak_drv.c:20:6:comm_can_transmit_eid	56	static
+../Core/Src/ak_drv.c:40:6:buffer_append_int32	24	static
+../Core/Src/ak_drv.c:59:6:buffer_append_int16	24	static
+../Core/Src/ak_drv.c:70:6:comm_can_set_pos	24	static
+../Core/Src/ak_drv.c:79:6:comm_can_set_pos_spd	40	static
+../Core/Src/ak_drv.c:100:6:comm_can_set_origin	24	static
+../Core/Src/ak_drv.c:109:6:comm_can_set_rpm	24	static
+../Core/Src/ak_drv.c:118:6:comm_can_set_cb	24	static
+../Core/Src/ak_drv.c:125:6:comm_can_set_current	24	static
+../Core/Src/ak_drv.c:133:6:comm_can_set_duty	24	static
+../Core/Src/ak_drv.c:140:6:motor_receive	32	static
+../Core/Src/ak_drv.c:154:6:motorInit	8	static
+../Core/Src/ak_drv.c:158:6:motor_Calibration	40	static
